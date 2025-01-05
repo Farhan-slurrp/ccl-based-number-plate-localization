@@ -47,7 +47,7 @@ if __name__ == '__main__':
         # Convert to grayscale
         gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-       # Apply blackhat morphological operation
+        # Apply blackhat morphological operation
         filterSize =(13, 5) 
         rectKern = cv2.getStructuringElement(cv2.MORPH_RECT, 
                                         filterSize)
@@ -64,7 +64,7 @@ if __name__ == '__main__':
 			cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
 
 
-        # Compute the Scharr gradient representation of the blackhat image in the x-direction and then 
+        # Compute the Scharr gradient representation of the blackhat image in the x-direction 
         gradX = cv2.Sobel(blackhat_image, ddepth=cv2.CV_32F,
 			dx=1, dy=0, ksize=-1)
         gradX = np.absolute(gradX)
@@ -91,7 +91,7 @@ if __name__ == '__main__':
         binary_image = cv2.dilate(binary_image, None, iterations=2)
         final_image = cv2.erode(binary_image, None, iterations=1)
 
-        # CCL connectivity 4 and pattern analysis
+        # CCL connectivity and pattern analysis
         ccl_connectivity_analysis(image, final_image, "4")
         ccl_connectivity_analysis(image, final_image, "8")
 
