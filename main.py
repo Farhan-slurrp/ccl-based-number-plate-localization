@@ -2,36 +2,36 @@ import os
 import cv2
 import numpy as np
 
-# Apply Gaussian Blur to reduce noise
-def gaussian_blur(image, kernel_size=5, sigma=1.0):
-    """Apply Gaussian Blur to the image."""
-    kernel = np.fromfunction(
-        lambda x, y: (1 / (2 * np.pi * sigma ** 2)) * 
-                     np.exp(-((x - (kernel_size - 1) / 2) ** 2 + (y - (kernel_size - 1) / 2) ** 2) / (2 * sigma ** 2)),
-        (kernel_size, kernel_size)
-    )
-    kernel = kernel / np.sum(kernel)  # Normalize the kernel
-    return cv2.filter2D(image, -1, kernel)
+def ccl_connectivity_analysis(image, final_image, type):
+    # Find Connected Components
+    num_labels, labels = cv2.connectedComponents(final_image, connectivity=8 if type == "8" else 4)
 
-def histogram_equalization(image: np.ndarray):
-    """Apply manual histogram equalization to a grayscale image."""
-    
-    # Compute the histogram
-    hist, bins = np.histogram(image.flatten(), bins=256, range=[0, 256])
-    
-    # Compute the cumulative distribution function (CDF)
-    cdf = hist.cumsum()
-    
-    # Normalize the CDF
-    cdf_normalized = (cdf - cdf.min()) * 255 / (cdf.max() - cdf.min())
-    
-    # Use the normalized CDF to map the pixel values to new values
-    image_equalized = np.interp(image.flatten(), bins[:-1], cdf_normalized)
-    
-    # Reshape the flattened image back to its original shape
-    image_equalized = image_equalized.reshape(image.shape).astype(np.uint8)
-    
-    return image_equalized
+    # Filter the components based on size and aspect ratio
+    plate_regions = []
+    for i in range(1, num_labels):  # We start from 1 to avoid the background label
+        # Extract the region of the component
+        component = np.where(labels == i, 255, 0).astype(np.uint8)
+            
+        # Find contours of the component
+        contours, _ = cv2.findContours(component, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+        for contour in contours:
+            # Get bounding box around the contour
+            x, y, w, h = cv2.boundingRect(contour)
+                
+            # Filter based on aspect ratio and size
+            aspect_ratio = float(w) / h
+            if 3 < aspect_ratio < 9:
+                plate_regions.append((x, y, w, h))
+
+    # Draw bounding boxes around potential number plates
+    for (x, y, w, h) in plate_regions:
+        cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+    cv2.waitKey(0)
+    localized_path = f'localized_{"c8" if type == "8" else "c4"}'
+    result_path = os.path.join(localized_path, image_file)
+    cv2.imwrite(result_path, image)
 
 if __name__ == '__main__':
     folder_path = 'vehicle_dataset'
@@ -47,51 +47,53 @@ if __name__ == '__main__':
         # Convert to grayscale
         gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-        # Apply gaussian blur to reduce noise
-        blurred_image = gaussian_blur(gray_image)
+       # Apply blackhat morphological operation
+        filterSize =(13, 5) 
+        rectKern = cv2.getStructuringElement(cv2.MORPH_RECT, 
+                                        filterSize)
+        blackhat_image = cv2.morphologyEx(gray_image,  
+                              cv2.MORPH_BLACKHAT, 
+                              rectKern)
+        
+        # Get the light region from image and may contain plate number by:
+        # Apply Closing morphological operation (Dilation, then erosion)
+        squareKern = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        light_image = cv2.morphologyEx(gray_image, cv2.MORPH_CLOSE, squareKern)
+        # Apply otsu thresholding to binarize the image
+        light_image = cv2.threshold(light_image, 0, 255,
+			cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
 
-        # Apply histogram equalixzation to enhance the contrast
-        equalized_image = histogram_equalization(blurred_image)
 
-        # Apply Otsu's Thresholding
-        _, otsu_thresholded = cv2.threshold(equalized_image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        # Compute the Scharr gradient representation of the blackhat image in the x-direction and then 
+        gradX = cv2.Sobel(blackhat_image, ddepth=cv2.CV_32F,
+			dx=1, dy=0, ksize=-1)
+        gradX = np.absolute(gradX)
+        (minVal, maxVal) = (np.min(gradX), np.max(gradX))
+        gradX = 255 * ((gradX - minVal) / (maxVal - minVal))
+        # Scale the result back to the range [0, 255]
+        gradX = gradX.astype("uint8")
 
-        # Perform canny edge detection
-        low_threshold = 50
-        high_threshold = 150
-        canny_edges = cv2.Canny(equalized_image, low_threshold, high_threshold)
+        # Apply gaussian blur
+        gradX = cv2.GaussianBlur(gradX, (5, 5), 0)
+        #Binarize the image with Otsu thresholding
+        gradX = cv2.morphologyEx(gradX, cv2.MORPH_CLOSE, rectKern)
+        binary_image = cv2.threshold(gradX, 0, 255,
+			cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
 
-        # Find Connected Components
-        num_labels, labels = cv2.connectedComponents(canny_edges)
+        # Perform a series of erotion and dilation
+        binary_image = cv2.erode(binary_image, None, iterations=2)
+        binary_image = cv2.dilate(binary_image, None, iterations=2)
 
-        # Filter the components based on size and aspect ratio
-        plate_regions = []
-        for i in range(1, num_labels):  # We start from 1 to avoid the background label
-            # Extract the region of the component
-            component = np.where(labels == i, 255, 0).astype(np.uint8)
-            
-            # Find contours of the component
-            contours, _ = cv2.findContours(component, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            
-            for contour in contours:
-                # Get bounding box around the contour
-                x, y, w, h = cv2.boundingRect(contour)
-                
-                # Filter based on aspect ratio and size
-                aspect_ratio = float(w) / h
-                if 0.2 < float(h) / w < 0.3 and 3000 < w * h < 10000:
-                    plate_regions.append((x, y, w, h))
+        # Take the bitwise AND between our binary_image and light_image
+        binary_image = cv2.bitwise_and(binary_image, binary_image, mask=light_image)
 
-        # Draw bounding boxes around potential number plates
-        for (x, y, w, h) in plate_regions:
-            cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        # Perform another series of erotion and dilation and get the final image
+        binary_image = cv2.dilate(binary_image, None, iterations=2)
+        final_image = cv2.erode(binary_image, None, iterations=1)
 
-        # Show the result
-        # cv2.imshow(f"Number Plate Localization - {image_file}", image)
-        cv2.waitKey(0)  # Wait for user input to close the window
-        localized_path = 'localized'
-        result_path = os.path.join(localized_path, image_file)
-        cv2.imwrite(result_path, image)
+        # CCL connectivity 4 and pattern analysis
+        ccl_connectivity_analysis(image, final_image, "4")
+        ccl_connectivity_analysis(image, final_image, "8")
 
     # close windows
     cv2.destroyAllWindows()
