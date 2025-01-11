@@ -1,4 +1,5 @@
 import os
+import time
 import cv2
 import numpy as np
 
@@ -19,7 +20,7 @@ def ccl_connectivity_analysis(image, final_image, type):
             # Get bounding box around the contour
             x, y, w, h = cv2.boundingRect(contour)
                 
-            # Filter based on aspect ratio and size
+            # Filter based on aspect ratio
             aspect_ratio = float(w) / h
             if 3 < aspect_ratio < 9:
                 plate_regions.append((x, y, w, h))
@@ -28,12 +29,12 @@ def ccl_connectivity_analysis(image, final_image, type):
     for (x, y, w, h) in plate_regions:
         cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
-    cv2.waitKey(0)
     localized_path = f'localized_{"c8" if type == "8" else "c4"}'
     result_path = os.path.join(localized_path, image_file)
     cv2.imwrite(result_path, image)
 
 if __name__ == '__main__':
+    start = time.time()
     folder_path = 'vehicle_dataset'
 
     # Get a list of all files in the folder
@@ -94,6 +95,9 @@ if __name__ == '__main__':
         # CCL connectivity and pattern analysis
         ccl_connectivity_analysis(image, final_image, "4")
         ccl_connectivity_analysis(image, final_image, "8")
+    
+    end = time.time()
+    print(end - start)
 
     # close windows
     cv2.destroyAllWindows()
